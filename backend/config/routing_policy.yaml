@@ -1,0 +1,149 @@
+# ─────────────────────────────────────────────────────────────────
+# Model Routing Policy
+# Controls which LLM is used per task type.
+# Agent selects automatically; user can override inline in UI.
+# ─────────────────────────────────────────────────────────────────
+
+defaults:
+  fallback_model: gpt-4o
+  max_retries: 3
+  retry_backoff_seconds: [1, 2, 4]
+  streaming: true
+  timeout_seconds: 120
+
+# ── Task-Level Routing ────────────────────────────────────────────
+task_routing:
+  orchestration:
+    primary: claude-opus-4
+    fallback: gpt-4o
+    tier: strong
+    reason: "High-stakes routing decisions requiring deep judgment"
+
+  intake_conversation:
+    primary: claude-sonnet-4-6
+    fallback: gpt-4o
+    tier: strong
+    reason: "Nuanced discovery conversation with contextual awareness"
+
+  question_generation:
+    primary: claude-sonnet-4-6
+    fallback: gpt-4o
+    tier: strong
+    reason: "Reasoning about what is missing and what matters most"
+
+  gap_detection:
+    primary: claude-opus-4
+    fallback: gpt-4o
+    tier: strong
+    reason: "Critical accuracy — missing a gap is costly downstream"
+
+  brd_generation:
+    primary: claude-sonnet-4-6
+    fallback: gpt-4o
+    tier: strong
+    reason: "Structured document requiring domain reasoning"
+
+  prd_generation:
+    primary: claude-sonnet-4-6
+    fallback: gpt-4o
+    tier: strong
+    reason: "Structured document requiring domain reasoning"
+
+  frd_generation:
+    primary: claude-sonnet-4-6
+    fallback: gpt-4o
+    tier: strong
+    reason: "Functional precision required"
+
+  story_generation:
+    primary: claude-sonnet-4-6
+    fallback: gpt-4o-mini
+    tier: medium
+    reason: "Template-guided; moderate reasoning required"
+
+  acceptance_criteria:
+    primary: claude-sonnet-4-6
+    fallback: gpt-4o-mini
+    tier: medium
+    reason: "Testability precision required"
+
+  spec_generation:
+    primary: claude-sonnet-4-6
+    fallback: gpt-4o
+    tier: medium
+    reason: "Semi-structured; field definitions, state machines"
+
+  matrix_generation:
+    primary: claude-haiku-4-5
+    fallback: gpt-4o-mini
+    tier: fast
+    reason: "Extraction and formatting from existing context"
+
+  api_contract:
+    primary: claude-sonnet-4-6
+    fallback: gpt-4o
+    tier: strong
+    reason: "Technical precision required for API contracts"
+
+  po_review:
+    primary: claude-opus-4
+    fallback: gpt-4o
+    tier: strong
+    reason: "Highest-stakes output — review quality directly impacts delivery"
+
+  consistency_check:
+    primary: claude-sonnet-4-6
+    fallback: gpt-4o
+    tier: strong
+    reason: "Cross-document reasoning"
+
+  handoff_assembly:
+    primary: claude-sonnet-4-6
+    fallback: gpt-4o-mini
+    tier: medium
+    reason: "Assembly and formatting from approved artifacts"
+
+  retrieval:
+    primary: claude-haiku-4-5
+    fallback: gpt-4o-mini
+    tier: fast
+    reason: "RAG retrieval — low reasoning, high throughput"
+
+  pii_detection:
+    primary: local
+    fallback: presidio
+    tier: local
+    reason: "Must NOT send data to external LLM — rule-based or local model only"
+
+# ── Region-Aware Provider Constraints ────────────────────────────
+region_constraints:
+  EU:
+    allowed_providers:
+      - anthropic          # EU inference available
+      - azure_openai       # EU regions: westeurope, northeurope
+    denied_providers:
+      - openai             # No EU-only inference guarantee without Azure
+    notes: "GDPR: EU personal data must not leave EU without SCCs"
+
+  IN:
+    allowed_providers:
+      - anthropic
+      - azure_openai
+    denied_providers:
+      - openai
+    notes: "DPDPA: Indian data subject data requires compliant cross-border transfer"
+
+  US:
+    allowed_providers:
+      - anthropic
+      - openai
+      - azure_openai
+      - google
+    denied_providers: []
+
+# ── Cost Guard ────────────────────────────────────────────────────
+cost_policy:
+  default_session_budget_usd: 5.00
+  warn_at_percent: 80
+  hard_stop_at_percent: 100
+  # TODO: Wire per-org billing limits when SaaS billing is implemented
