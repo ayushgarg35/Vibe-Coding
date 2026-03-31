@@ -10,7 +10,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from api.middleware.audit import AuditLogMiddleware
 from api.middleware.region_guard import RegionGuardMiddleware
-from api.routes import artifacts, approvals, models, review, sessions
+from api.routes import artifacts, approvals, collab, models, review, sessions
 from config.settings import get_settings
 from storage.database import init_db
 
@@ -55,6 +55,7 @@ app.include_router(artifacts.router, prefix="/api/v1/artifacts", tags=["Artifact
 app.include_router(approvals.router, prefix="/api/v1/approvals", tags=["Approvals"])
 app.include_router(review.router, prefix="/api/v1/review", tags=["Review"])
 app.include_router(models.router, prefix="/api/v1/models", tags=["Models"])
+app.include_router(collab.router, prefix="/api/v1/collab", tags=["Collaboration"])
 
 
 @app.get("/health")

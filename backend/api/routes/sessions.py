@@ -212,18 +212,18 @@ async def stream_session(
     user: AuthContext = Depends(get_current_user),
 ):
     """
-    SSE endpoint — streams agent output to the frontend in real time.
-    Frontend subscribes via EventSource when a session is active.
+    SSE endpoint — streams agent output tokens to the frontend in real time.
+    Subscribes to the Redis pub/sub channel for this session.
+    Each token published by an agent is forwarded as an SSE event.
     """
-    async def event_generator() -> AsyncIterator[str]:
-        import asyncio
-        import json
-        # TODO: Subscribe to Redis pub/sub channel for this session
-        # and yield SSE events as agents produce tokens
-        yield f"data: {json.dumps({'type': 'connected', 'session_id': session_id})}\n\n"
-        # Keep-alive ping every 15s
-        while True:
-            await asyncio.sleep(15)
-            yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+    from workflows.stream_bus import subscribe
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        subscribe(session_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # disable nginx buffering
+            "Connection": "keep-alive",
+        },
+    )

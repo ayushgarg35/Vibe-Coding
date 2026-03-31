@@ -332,7 +332,7 @@ export default function SessionPage({ params }: { params: { id: string } }) {
           {/* Artifact content */}
           <div className="flex-1 overflow-y-auto p-4">
             {activeArtifact && artifactContent ? (
-              <ArtifactViewer type={activeArtifact} content={artifactContent} />
+              <ArtifactViewer type={activeArtifact} content={artifactContent} sessionId={sessionId} />
             ) : (
               <div className="flex items-center justify-center h-full text-gray-700 text-sm">
                 Select an artifact to view
@@ -459,24 +459,55 @@ function ClarificationPanel({
   );
 }
 
-function ArtifactViewer({ type, content }: { type: string; content: unknown }) {
+function ArtifactViewer({
+  type, content, sessionId,
+}: { type: string; content: unknown; sessionId: string }) {
+  const [collabMode, setCollabMode] = useState(false);
+
+  if (collabMode) {
+    const { CollabArtifactViewer } = require("@/components/artifacts/CollabArtifactViewer");
+    return (
+      <div className="h-full flex flex-col">
+        <button
+          onClick={() => setCollabMode(false)}
+          className="text-xs text-gray-600 hover:text-gray-300 mb-2 text-right"
+        >
+          ← View mode
+        </button>
+        <CollabArtifactViewer
+          sessionId={sessionId}
+          artifactType={type}
+          initialContent={content}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-white">{type.replace("_", " ")}</h2>
-        <button
-          onClick={() => {
-            const blob = new Blob([JSON.stringify(content, null, 2)], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `${type.toLowerCase()}.json`;
-            a.click();
-          }}
-          className="text-xs text-gray-600 hover:text-gray-300"
-        >
-          Export JSON
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setCollabMode(true)}
+            className="text-xs text-blue-500 hover:text-blue-400 transition-colors"
+          >
+            Edit collaboratively
+          </button>
+          <button
+            onClick={() => {
+              const blob = new Blob([JSON.stringify(content, null, 2)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `${type.toLowerCase()}.json`;
+              a.click();
+            }}
+            className="text-xs text-gray-600 hover:text-gray-300"
+          >
+            Export JSON
+          </button>
+        </div>
       </div>
       <pre className="text-xs text-gray-400 bg-gray-900 rounded-lg p-4 overflow-auto whitespace-pre-wrap">
         {JSON.stringify(content, null, 2)}

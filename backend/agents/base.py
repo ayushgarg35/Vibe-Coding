@@ -1,13 +1,14 @@
 """
 Base Agent — all specialist agents extend this.
 Enforces the contract: task_type, prompt template, structured output schema.
+Publishes streaming tokens to Redis SSE bus during stream calls.
 """
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
-import yaml
 import structlog
+import yaml
 
 from adapters.base import ModelRequest, ModelResponse
 from adapters.litellm_adapter import LiteLLMAdapter
@@ -16,16 +17,8 @@ log = structlog.get_logger()
 
 
 class BaseAgent(ABC):
-    """
-    All agents share:
-    - A task_type that maps to the routing policy
-    - A prompt template loaded from /prompts/
-    - A structured output schema (Pydantic or JSON schema)
-    - Access to the shared LiteLLM adapter
-    """
-
-    task_type: str  # must match routing_policy.yaml key
-    prompt_template_path: str  # relative to /prompts/
+    task_type: str           # must match routing_policy.yaml key
+    prompt_template_path: str
 
     def __init__(self, adapter: LiteLLMAdapter | None = None):
         self._adapter = adapter or LiteLLMAdapter()
@@ -41,11 +34,17 @@ class BaseAgent(ABC):
 
     def _build_system_prompt(self, context: dict) -> str:
         template = self._prompt_template.get("system_prompt", "")
-        return template.format(**context) if context else template
+        try:
+            return template.format(**context) if context else template
+        except KeyError:
+            return template
 
     def _build_user_message(self, context: dict) -> str:
         template = self._prompt_template.get("user_message", "")
-        return template.format(**context) if context else template
+        try:
+            return template.format(**context) if context else template
+        except KeyError:
+            return template
 
     @abstractmethod
     async def run(
@@ -61,8 +60,7 @@ class BaseAgent(ABC):
           - output: the primary artifact or result
           - agent: self.task_type
           - model_used: which model was selected
-          - assumptions: any assumptions made
-          - open_questions: questions for the user (if any)
+          - cost_usd: cost of this call
         """
         ...
 
@@ -83,12 +81,47 @@ class BaseAgent(ABC):
         )
         return await self._adapter.complete(request)
 
+    async def _stream_to_bus(
+        self,
+        messages: list[dict],
+        session_id: str,
+        data_region: str = "US",
+        user_model_override: str | None = None,
+    ) -> str:
+        """
+        Stream model output token-by-token, publishing each token to the Redis bus.
+        Returns the full assembled content string.
+        Used for agents where the user watches the output being written live.
+        """
+        from workflows.stream_bus import publish_agent_complete, publish_agent_start, publish_token
+
+        request = ModelRequest(
+            task_type=self.task_type,
+            messages=messages,
+            data_region=data_region,
+            user_model_override=user_model_override,
+        )
+
+        # Resolve which model will be used (for display in UI)
+        model_id = user_model_override or self.task_type  # bus shows task_type if no override
+
+        await publish_agent_start(session_id, self.task_type, model=model_id)
+
+        full_content = ""
+        async for token in self._adapter.stream(request):
+            full_content += token
+            await publish_token(session_id, self.task_type, token, model=model_id)
+
+        await publish_agent_complete(session_id, self.task_type)
+        return full_content
+
     async def _stream_model(
         self,
         messages: list[dict],
         data_region: str = "US",
         user_model_override: str | None = None,
-    ):
+    ) -> AsyncIterator[str]:
+        """Raw streaming iterator — use when caller handles publishing."""
         request = ModelRequest(
             task_type=self.task_type,
             messages=messages,
