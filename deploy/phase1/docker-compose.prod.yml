@@ -1,0 +1,173 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────
+# Production Docker Compose — Phase 1 (Single Server)
+# Usage: docker compose -f docker-compose.prod.yml up -d
+# ─────────────────────────────────────────────────────────────────
+
+x-restart: &restart
+  restart: unless-stopped
+
+x-logging: &logging
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "50m"
+      max-file: "5"
+
+services:
+  # ── PostgreSQL ────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    <<: [*restart, *logging]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    # NOT exposed to host — only accessible within internal network
+
+  # ── Redis ─────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    <<: [*restart, *logging]
+    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # ── Qdrant ────────────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:latest
+    <<: [*restart, *logging]
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - internal
+
+  # ── MinIO (S3-compatible) ─────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    <<: [*restart, *logging]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - internal
+
+  # ── Backend (FastAPI) ─────────────────────────────────────────
+  backend:
+    image: ${REGISTRY}/agentic-pm-backend:${IMAGE_TAG:-latest}
+    <<: [*restart, *logging]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: .env.production
+    environment:
+      - APP_ENV=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    ports:
+      - "127.0.0.1:8000:8000"   # only on loopback — Caddy proxies externally
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - internal
+    command: >
+      uvicorn main:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 4
+      --proxy-headers
+      --forwarded-allow-ips="*"
+
+  # ── Celery Worker ─────────────────────────────────────────────
+  worker:
+    image: ${REGISTRY}/agentic-pm-backend:${IMAGE_TAG:-latest}
+    <<: [*restart, *logging]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: .env.production
+    environment:
+      - APP_ENV=production
+    depends_on:
+      - backend
+      - redis
+    networks:
+      - internal
+    command: >
+      celery -A config.celery_app worker
+      --loglevel=info
+      --concurrency=4
+      --max-tasks-per-child=100
+
+  # ── Celery Beat (scheduled tasks) ────────────────────────────
+  beat:
+    image: ${REGISTRY}/agentic-pm-backend:${IMAGE_TAG:-latest}
+    <<: [*restart, *logging]
+    env_file: .env.production
+    environment:
+      - APP_ENV=production
+    depends_on:
+      - redis
+    networks:
+      - internal
+    command: celery -A config.celery_app beat --loglevel=info
+
+  # ── Frontend (Next.js) ────────────────────────────────────────
+  frontend:
+    image: ${REGISTRY}/agentic-pm-frontend:${IMAGE_TAG:-latest}
+    <<: [*restart, *logging]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    env_file: .env.production
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  minio_data:
