@@ -91,12 +91,14 @@ else
     warn "Memory — ${MEM_USE}% used (consider upgrading instance)"
 fi
 
-# ── Caddy / SSL ───────────────────────────────────────────────────
+# ── Nginx reverse proxy ───────────────────────────────────────────
 echo -e "\n${BOLD}Reverse Proxy:${NC}"
-if systemctl is-active --quiet caddy; then
+if systemctl is-active --quiet nginx; then
+    ok "Nginx — running"
+elif systemctl is-active --quiet caddy; then
     ok "Caddy — running"
 else
-    fail "Caddy — not running (run: systemctl start caddy)"
+    fail "Nginx/Caddy — not running (run: systemctl start nginx)"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────
